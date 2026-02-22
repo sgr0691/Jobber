@@ -1,111 +1,123 @@
 # Jobber
 
-Jobber is a stateful, workflow-driven job automation system built for anyone who wants leverage --- not spam.
+Jobber is a hybrid job agent that automates repetitive job-search work while preserving human-in-the-loop safety.
 
-It intelligently:
+## Rivet-First v2 Architecture
 
--   Discovers relevant job postings\
--   Scores them using AI\
--   Generates tailored application materials\
--   Applies automatically when safe\
--   Drafts recruiter outreach\
--   Tracks everything in real time
+- Brain: Cloudflare Worker with actor-style workflow classes
+- Intelligence: Workers AI scoring + drafting
+- Hands: Runner poller using Playwright-compatible execution
+- UI: Astro dashboard with WebSocket subscriptions
 
-Jobber treats job acquisition like a distributed system --- with
-workflows, retries, state transitions, and observability.
+Workflow:
 
-------------------------------------------------------------------------
+```text
+DISCOVER -> SCORE -> DRAFT -> APPLY -> OUTREACH -> FOLLOWUP
+```
 
-## Why Jobber Exists
+## Implemented Modules
 
-Job searching is repetitive and mechanical.
+### Worker Brain (`apps/worker`)
 
-Instead of manually: - Scanning job boards\
-- Copying/pasting applications\
-- Writing similar cover letters\
-- Tracking follow-ups in spreadsheets
+Actor definitions:
 
-Jobber automates the mechanical work while keeping humans in control.
+- `JobWorkspace`
+  - State: jobs, scores, drafts, applications
+  - Methods: `discover()`, `score(jobId)`, `draft(jobId)`, `queueApply(jobId)`, `markApplied(jobId)`
+- `RunnerCoordinator`
+  - State: pending tasks, in-flight tasks, retry tracking
+  - Methods: `enqueueTask()`, `claimPending()`, `receiveResult()`
 
-This is not a mass-apply bot.\
-This is intelligent automation with guardrails.
+Realtime events:
 
-------------------------------------------------------------------------
+- `job_scored`
+- `application_submitted`
+- `approval_required`
 
-## Architecture (High Level)
+### Discovery + Scoring
 
-**Brain → Rivet Actors on Cloudflare Workers**\
-Stateful workflows, retries, scheduling, and real-time events.
+Weighted scoring combines:
 
-**Intelligence → Workers AI**\
-Parses job descriptions, scores alignment, drafts tailored materials.
+- title alignment
+- skills overlap
+- compensation fit
+- remote compatibility
+- semantic fit (Workers AI with heuristic fallback)
 
-**Hands → Browser Use + Playwright Runner**\
-Executes real browser automation for complex job applications.
+Risk flags:
 
-**UI → Astro Dashboard**\
-Provides visibility, approval gates, and full audit trail.
+- `CLEARANCE_REQUIRED`
+- `ONSITE_ONLY`
+- `WORKDAY_FLOW`
 
-------------------------------------------------------------------------
+### Apply Autopilot Rules
 
-## Core Workflow
+Autopilot is implemented exactly as specified:
 
-DISCOVER → SCORE → DRAFT → APPLY → OUTREACH → FOLLOWUP
+- Auto-apply if score >= 85, no risk flags, and simple apply flow
+- Require approval for Workday flows or medium scores (70-84)
+- Block if clearance required or onsite-only while remote is needed
 
-Autopilot only runs when: - Score ≥ threshold\
-- No risk flags\
-- Simple apply flow
+### Runner (`runner`)
 
-Everything else requires approval.
+The runner loop:
 
-------------------------------------------------------------------------
+1. Polls `GET /api/runner/pending`
+2. Executes task (Playwright-ready path + dry-run safe mode)
+3. Detects captcha checkpoints and returns `NEEDS_APPROVAL`
+4. Sends outcome to `POST /api/runner/result`
 
-## Tech Choices (Simple Explanation)
+### Dashboard (`apps/dashboard`)
 
-**Rivet**\
-Provides stateful actors and workflows so we don't reinvent queue
-systems.
+Astro dashboard supports:
 
-**Cloudflare Workers**\
-Global, serverless runtime with generous free tier.
+- state refresh (`/api/state`)
+- seed demo jobs
+- per-job score/draft/queue actions
+- approval queue with approve/reject controls
+- WebSocket event feed from worker `/ws`
 
-**Workers AI**\
-Edge-based AI inference for scoring and drafting.
+## Worker API
 
-**Browser Use + Playwright**\
-Real browser automation for multi-step application flows.
+- `GET /api/state`
+- `POST /api/jobs/discover`
+- `POST /api/jobs/:jobId/score`
+- `POST /api/jobs/:jobId/draft`
+- `POST /api/jobs/:jobId/queue-apply`
+- `POST /api/jobs/:jobId/approve`
+- `POST /api/jobs/:jobId/reject`
+- `GET /api/runner/pending`
+- `POST /api/runner/result`
+- `GET /ws`
 
-**Astro**\
-Lightweight dashboard deployed on Cloudflare Pages.
+## Local Development
 
-------------------------------------------------------------------------
+Install dependencies:
 
-## Safety Principles
+```bash
+npm install
+```
 
--   Human-in-the-loop\
--   No bypassing protections\
--   Clear audit trail\
--   Global kill switch
+Start worker:
 
-------------------------------------------------------------------------
+```bash
+npm run dev:worker
+```
 
-## What Makes It Different
+Start dashboard:
 
-Most job automation scripts: - Blindly apply\
-- Lack scoring logic\
-- Have no state awareness
+```bash
+npm run dev:dashboard
+```
 
-Jobber behaves like a production backend system --- reliable,
-observable, and controlled.
+Start runner:
 
-------------------------------------------------------------------------
+```bash
+npm run dev:runner
+```
 
-## Status
+Run tests:
 
-Active development.\
-Rivet-first architecture.\
-Hybrid cloud + browser automation.
-
-------------------------------------------------------------------------
-
-Apply smarter, not louder.
+```bash
+npm test
+```

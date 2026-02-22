@@ -1,0 +1,19 @@
+{
+  "name": "@jobber/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "wrangler deploy src/index.ts --dry-run"
+  },
+  "dependencies": {
+    "rivetkit": "^2.0.42",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "wrangler": "^4.38.0"
+  }
+}
