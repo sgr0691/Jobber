@@ -1,0 +1,8 @@
+name = "jobber-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+JOBBER_REMOTE_REQUIRED = "true"
+JOBBER_AUTO_APPLY_THRESHOLD = "85"
+JOBBER_APPROVAL_THRESHOLD = "70"

@@ -1,0 +1,321 @@
+---
+const defaultApiBase = "http://127.0.0.1:8787";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Jobber Dashboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #0f1117;
+        color: #e8eefc;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 1.5rem;
+      }
+      .panel {
+        background: #171b25;
+        border: 1px solid #2a3040;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+      .row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 0;
+        padding: 0.5rem 0.85rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.primary {
+        background: #4a8eff;
+        color: #fff;
+      }
+      button.warn {
+        background: #f7b955;
+        color: #10131a;
+      }
+      button.danger {
+        background: #f87171;
+        color: #fff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #2a3040;
+        text-align: left;
+        padding: 0.5rem;
+        vertical-align: top;
+      }
+      input {
+        background: #11151f;
+        border: 1px solid #2a3040;
+        color: #e8eefc;
+        border-radius: 8px;
+        padding: 0.45rem 0.6rem;
+        min-width: 280px;
+      }
+      code {
+        background: #11151f;
+        border-radius: 6px;
+        padding: 0.2rem 0.35rem;
+      }
+      #eventLog {
+        max-height: 180px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Hybrid Job Agent Dashboard</h1>
+      <p>Workflow: <code>DISCOVER → SCORE → DRAFT → APPLY → OUTREACH → FOLLOWUP</code></p>
+
+      <section class="panel">
+        <div class="row">
+          <label for="apiBase">Worker API:</label>
+          <input id="apiBase" value={defaultApiBase} />
+          <button id="connectBtn" class="primary">Connect WebSocket</button>
+          <button id="seedBtn" class="warn">Seed Demo Jobs</button>
+          <button id="refreshBtn" class="primary">Refresh State</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Jobs</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Company</th>
+              <th>Score</th>
+              <th>Apply Flow</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Approval Queue</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Status</th>
+              <th>Notes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="approvalBody"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Realtime Events</h2>
+        <div id="eventLog">No events yet.</div>
+      </section>
+    </main>
+
+    <script type="module" is:inline>
+      const apiBaseInput = document.getElementById("apiBase");
+      const jobsBody = document.getElementById("jobsBody");
+      const approvalBody = document.getElementById("approvalBody");
+      const eventLog = document.getElementById("eventLog");
+      const connectBtn = document.getElementById("connectBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const seedBtn = document.getElementById("seedBtn");
+
+      let socket;
+      let state = { jobs: [], scores: [], applications: [] };
+
+      function apiBase() {
+        return apiBaseInput.value.trim().replace(/\/$/, "");
+      }
+
+      function appendEvent(event) {
+        const line = `[${new Date().toLocaleTimeString()}] ${event.type}: ${JSON.stringify(event.payload)}`;
+        eventLog.textContent = eventLog.textContent === "No events yet." ? line : `${line}\n${eventLog.textContent}`;
+      }
+
+      function scoreByJobId() {
+        const index = new Map();
+        for (const score of state.scores) {
+          index.set(score.jobId, score);
+        }
+        return index;
+      }
+
+      async function post(path, payload = {}) {
+        const response = await fetch(`${apiBase()}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(`POST ${path} failed (${response.status}): ${body}`);
+        }
+        return response.json();
+      }
+
+      async function loadState() {
+        const response = await fetch(`${apiBase()}/api/state`);
+        if (!response.ok) {
+          throw new Error(`State request failed: ${response.status}`);
+        }
+        state = await response.json();
+        render();
+      }
+
+      function render() {
+        const scores = scoreByJobId();
+        jobsBody.innerHTML = "";
+        approvalBody.innerHTML = "";
+
+        for (const job of state.jobs) {
+          const tr = document.createElement("tr");
+          const score = scores.get(job.id)?.totalScore ?? "—";
+          tr.innerHTML = `
+            <td>${job.title}</td>
+            <td>${job.company}</td>
+            <td>${score}</td>
+            <td>${job.applyFlow}</td>
+            <td class="row">
+              <button class="primary" data-action="score" data-job="${job.id}">Score</button>
+              <button class="primary" data-action="draft" data-job="${job.id}">Draft</button>
+              <button class="warn" data-action="queue" data-job="${job.id}">Queue Apply</button>
+            </td>
+          `;
+          jobsBody.appendChild(tr);
+        }
+
+        for (const app of state.applications.filter((item) => item.status === "NEEDS_APPROVAL")) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${app.jobId}</td>
+            <td>${app.status}</td>
+            <td>${app.notes ?? ""}</td>
+            <td class="row">
+              <button class="primary" data-action="approve" data-job="${app.jobId}">Approve</button>
+              <button class="danger" data-action="reject" data-job="${app.jobId}">Reject</button>
+            </td>
+          `;
+          approvalBody.appendChild(tr);
+        }
+      }
+
+      async function seedDemoJobs() {
+        await post("/api/jobs/discover", {
+          jobs: [
+            {
+              title: "Senior Full Stack Engineer",
+              company: "Remote First Labs",
+              url: "https://example.com/jobs/remote-first-labs",
+              description: "Build TypeScript services and modern web interfaces.",
+              skills: ["TypeScript", "Node", "Astro", "Cloudflare Workers"],
+              compensation: 180000,
+              applyFlow: "simple",
+              locationType: "remote",
+              requiresClearance: false
+            },
+            {
+              title: "Platform Engineer",
+              company: "Enterprise Corp",
+              url: "https://example.com/jobs/enterprise-platform",
+              description: "Own internal platform and CI/CD lifecycle.",
+              skills: ["Kubernetes", "TypeScript", "API Design"],
+              compensation: 165000,
+              applyFlow: "workday",
+              locationType: "hybrid",
+              requiresClearance: false
+            }
+          ]
+        });
+        await loadState();
+      }
+
+      jobsBody.addEventListener("click", async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement)) {
+          return;
+        }
+        const action = target.dataset.action;
+        const jobId = target.dataset.job;
+        if (!action || !jobId) {
+          return;
+        }
+
+        if (action === "score") {
+          await post(`/api/jobs/${jobId}/score`);
+        } else if (action === "draft") {
+          await post(`/api/jobs/${jobId}/draft`);
+        } else if (action === "queue") {
+          await post(`/api/jobs/${jobId}/queue-apply`);
+        }
+        await loadState();
+      });
+
+      approvalBody.addEventListener("click", async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement)) {
+          return;
+        }
+        const action = target.dataset.action;
+        const jobId = target.dataset.job;
+        if (!action || !jobId) {
+          return;
+        }
+        await post(`/api/jobs/${jobId}/${action}`);
+        await loadState();
+      });
+
+      connectBtn.addEventListener("click", () => {
+        socket?.close();
+        const wsUrl = apiBase().replace(/^http/, "ws") + "/ws";
+        socket = new WebSocket(wsUrl);
+        socket.addEventListener("open", () => appendEvent({ type: "system", payload: "WebSocket connected" }));
+        socket.addEventListener("message", (message) => {
+          try {
+            appendEvent(JSON.parse(message.data));
+            loadState();
+          } catch (error) {
+            appendEvent({ type: "parse_error", payload: String(error) });
+          }
+        });
+        socket.addEventListener("close", () => appendEvent({ type: "system", payload: "WebSocket closed" }));
+      });
+
+      refreshBtn.addEventListener("click", () => {
+        loadState().catch((error) => appendEvent({ type: "error", payload: String(error) }));
+      });
+
+      seedBtn.addEventListener("click", () => {
+        seedDemoJobs().catch((error) => appendEvent({ type: "error", payload: String(error) }));
+      });
+
+      loadState().catch((error) => appendEvent({ type: "error", payload: String(error) }));
+    </script>
+  </body>
+</html>
